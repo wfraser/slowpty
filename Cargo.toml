@@ -1,0 +1,11 @@
+[package]
+name = "slowpty-mio"
+version = "0.1.0"
+authors = ["William R. Fraser <wfraser@codewise.org>"]
+
+[dependencies]
+env_logger = "*"
+exec = "*"
+libc = "*"
+log = "0.4"
+mio = "0.6"
