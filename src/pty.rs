@@ -31,5 +31,13 @@ pub fn open_pty_pair() -> io::Result<PtyPair> {
         File::from_raw_fd(checkerr(libc::open(slavename, libc::O_RDWR), "open slave")?)
     };
 
+    #[cfg(target_os = "linux")]
+    {
+        checkerr(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETPIPE_SZ, 1) },
+            "F_SETPIPE_SZ, master")?;
+        checkerr(unsafe { libc::fcntl(slave.as_raw_fd(), libc::F_SETPIPE_SZ, 1) },
+            "F_SETPIPE_SZ, slave")?;
+    }
+
     Ok(PtyPair { master, slave })
 }

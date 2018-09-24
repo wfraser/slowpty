@@ -8,13 +8,16 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::os::unix::io::{FromRawFd, AsRawFd, RawFd};
+use std::process::exit;
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::unix::{EventedFd, UnixReady};
 
-pub mod delay;
-pub mod pty;
-pub mod term;
+mod delay;
+mod pty;
+mod term;
+
+use delay::Delay;
 
 pub fn checkerr(result: i32, msg: &str) -> io::Result<i32> {
     if result == -1 {
@@ -44,23 +47,32 @@ fn set_nonblocking(f: &mut File) -> io::Result<()> {
 struct ForkResult {
     child_pid: libc::pid_t,
     pty_master: File,
+    pty_slave: File,
 }
 
 fn setup() -> io::Result<ForkResult> {
-    let window_size = term::WindowSize::get(0)?;
+    let window_size = term::WindowSize::get_from_fd(0)?;
 
     let pty::PtyPair { master, slave } = pty::open_pty_pair()?;
 
     let pid = checkerr(unsafe { libc::fork() }, "fork")?;
     if pid != 0 {
         // parent
-        mem::drop(slave);
+
+        // Normally, we'd close the slave end of the pty at this point, but on macOS it's observed
+        // that when the child exits and closes its slave end, the pty drops all buffered input
+        // unless we also hold it open by keeping another FD to it.
+        // On Linux, we can use fcntl(F_SETPIPE_SZ, 1) to eliminate the buffer entirely, but macOS
+        // does not support this fcntl, so we have to do this instead.
+        //mem::drop(slave);
+
         term::save_term_settings(0)?;
         term::set_raw(0)?;
         term::restore_term_settings_at_exit()?;
         Ok(ForkResult { 
             child_pid: pid,
             pty_master: master,
+            pty_slave: slave, // keep it open because reasons
         })
     } else {
         // child
@@ -76,10 +88,9 @@ fn setup() -> io::Result<ForkResult> {
 
         term::set_session_leader()?;
         term::set_controlling_tty(0)?;
-        window_size.set(0)?;
+        window_size.apply_to_fd(0)?;
 
-        // exec the child
-        //loop {}
+        // exec the command
 
         let mut args = std::env::args_os().skip(2);
         let mut cmd = exec::Command::new(args.next().unwrap());
@@ -93,11 +104,30 @@ fn setup() -> io::Result<ForkResult> {
 fn main() {
     env_logger::init();
 
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 3
+        || args[1] == "--help"
+        || args[1] == "-h"
+    {
+        eprintln!("usage: {} <rate> <program> [<args>...]", args[0]);
+        eprintln!("  run the given program, limiting I/O to the specified number of\
+                     bytes per\n
+                   second.");
+        exit(2);
+    }
+
+    let rate: f64 = args[1].parse()
+        .unwrap_or_else(|e| {
+            eprintln!("error: invalid number for the rate: {}", e);
+            exit(2);
+        });
+    let delay = Delay::from_rate(rate);
+
     let poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(1024);
 
     let mut console = unsafe { File::from_raw_fd(0) };
-    let ForkResult { child_pid, mut pty_master } = setup().unwrap();
+    let ForkResult { child_pid, mut pty_master, pty_slave: _pty_slave } = setup().unwrap();
 
     let names = ["console", "pty"];
 
@@ -119,40 +149,47 @@ fn main() {
             debug!("{:?}", event);
 
             let index = event.token().0 as usize;
-            let (f, other) = if index == 0 {
+            let (source, dest) = if index == 0 {
                 (&mut console, &mut pty_master)
             } else {
                 (&mut pty_master, &mut console)
             };
 
-            let ready = UnixReady::from(event.readiness());
-            if ready.is_readable() {
-                let mut buf = [0u8];
+            let mut buf = [0u8];
 
-                match f.read(&mut buf) {
-                    Ok(0) => {
-                        debug!("zero bytes from {}", names[index]);
-                        break 'event;
-                    }
-                    Ok(1) => {
-                        other.write(&buf).unwrap();
-                        //println!("({})", buf[0] as char);
-                    }
-                    Ok(_) => {
-                        panic!("multiple bytes!");
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        debug!("wouldblock from {}", names[index]);
-                    }
-                    Err(ref e) => panic!("read error {}", e),
+            match source.read(&mut buf) {
+                Ok(0) => {
+                    debug!("zero bytes from {}", names[index]);
+                    break 'event;
+                }
+                Ok(1) => {
+                    debug!("got {:?}", buf[0] as char);
+                    dest.write(&buf).unwrap();
+                }
+                Ok(_) => {
+                    panic!("multiple bytes!");
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    debug!("wouldblock from {}", names[index]);
+                }
+                Err(ref e) => {
+                    panic!("read error {}", e);
                 }
             }
+
+            delay.sleep()
+                .unwrap_or_else(|e| {
+                    error!("delay error: {}", e);
+                });
         }
     }
 
     let mut child_status = 0;
     checkerr(unsafe { libc::waitpid(child_pid, &mut child_status, 0) }, "waitpid")
         .unwrap();
+
+    debug!("resetting tty settings");
+    term::reset_tty();
 
     if child_status != 0 {
         unsafe {
@@ -168,7 +205,9 @@ fn main() {
             }
             std::process::exit(-1);
         }
+    } else {
+        debug!("child exited cleanly");
     }
 
-    println!("Goodbye");
+    debug!("returning from main");
 }

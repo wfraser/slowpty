@@ -1,7 +1,6 @@
 use libc;
 use std::io;
 use std::mem;
-use std::process;
 use std::os::unix::io::RawFd;
 
 use ::checkerr;
@@ -9,17 +8,22 @@ use ::checkerr;
 static mut ORIGINAL_TERM_SETTINGS:
     [u8; mem::size_of::<libc::termios>()] =
     [0u8; mem::size_of::<libc::termios>()];
+static mut TERM_RESET: bool = false;
 
 unsafe fn original_term_settings() -> *mut libc::termios {
     &mut ORIGINAL_TERM_SETTINGS as *mut [u8] as *mut libc::termios
 }
 
-extern "C" fn reset_tty() {
+pub extern "C" fn reset_tty() {
     unsafe {
         // note: can't print anything here
-        let result = libc::tcsetattr(0, libc::TCSANOW, original_term_settings());
-        if 1 == result {
-            libc::abort()
+        if !TERM_RESET {
+            TERM_RESET = true;
+            let result = libc::tcsetattr(0, libc::TCSANOW, original_term_settings());
+            let _e = io::Error::last_os_error();
+            if -1 == result {
+                libc::abort()
+            }
         }
     }
 }
@@ -36,12 +40,6 @@ pub fn save_term_settings(fd: RawFd) -> io::Result<()> {
     let mut ws = unsafe { mem::zeroed::<libc::winsize>() };
     checkerr(unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut _) },
         "ioctl(TIOGCWINSZ)")?;
-
-    /*
-    unsafe {
-        ORIGINAL_TERM_SETTINGS = Box::into_raw(Box::new(mem::zeroed()));
-    }
-    */
 
     checkerr(unsafe { libc::tcgetattr(fd, original_term_settings()) },
         "tcgetattr(original settings")?;
@@ -69,14 +67,14 @@ pub struct WindowSize {
 }
 
 impl WindowSize {
-    pub fn get(fd: RawFd) -> io::Result<Self> {
+    pub fn get_from_fd(fd: RawFd) -> io::Result<Self> {
         let mut ws = unsafe { mem::zeroed::<libc::winsize>() };
         checkerr(unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut _) },
             "ioctl(TIOCGWINSZ)")?;
         Ok(WindowSize { ws })
     }
 
-    pub fn set(&self, fd: RawFd) -> io::Result<()> {
+    pub fn apply_to_fd(&self, fd: RawFd) -> io::Result<()> {
         checkerr(unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &self.ws) },
             "ioctl(TIOCSWINSZ)")?;
         Ok(())
