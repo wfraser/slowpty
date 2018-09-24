@@ -47,7 +47,7 @@ fn set_nonblocking(f: &mut File) -> io::Result<()> {
 struct ForkResult {
     child_pid: libc::pid_t,
     pty_master: File,
-    pty_slave: File,
+    pty_slave: Option<File>,
 }
 
 fn setup() -> io::Result<ForkResult> {
@@ -59,10 +59,18 @@ fn setup() -> io::Result<ForkResult> {
     if pid != 0 {
         // parent
 
-        // Normally, we'd close the slave end of the pty at this point, but on macOS it's observed
-        // that when the child exits and closes its slave end, the pty drops all buffered input
-        // unless we also hold it open by keeping another FD to it.
-        //mem::drop(slave);
+        let returned_slave = if cfg!(target_os = "darwin") {
+            // On macOS, it's observed that when the child exits and closes its slave end, the pty
+            // drops all buffered data unless we hold it open by keeping another FD to it.
+            Some(slave)
+        } else {
+            // On Linux, keeping a FD of the slave open is actively harmful and prevents us from
+            // getting a HUP signal or the pty master from returning EWOULDBLOCK at all, which
+            // results in us hanging when the child exits.
+            // Other unixes? Who knows; haven't tested it. But this behavior seems more reasonable.
+            mem::drop(slave);
+            None
+        };
 
         term::save_term_settings(0)?;
         term::set_raw(0)?;
@@ -70,7 +78,7 @@ fn setup() -> io::Result<ForkResult> {
         Ok(ForkResult { 
             child_pid: pid,
             pty_master: master,
-            pty_slave: slave, // keep it open because reasons
+            pty_slave: returned_slave,
         })
     } else {
         // child
@@ -145,6 +153,12 @@ fn main() {
 
         for event in &events {
             debug!("{:?}", event);
+
+            let readiness = UnixReady::from(event.readiness());
+            if readiness.is_hup() && !readiness.is_readable() {
+                debug!("breaking out");
+                break 'event;
+            }
 
             let index = event.token().0 as usize;
             let (source, dest) = if index == 0 {
