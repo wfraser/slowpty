@@ -10,7 +10,7 @@ static mut ORIGINAL_TERM_SETTINGS: Option<libc::termios> = None;
 pub extern "C" fn reset_tty() {
     unsafe {
         // note: can't print anything here
-        if let Some(settings) = ORIGINAL_TERM_SETTINGS {
+        if let Some(settings) = ORIGINAL_TERM_SETTINGS.take() {
             let result = libc::tcsetattr(0, libc::TCSANOW, &settings);
             let _e = io::Error::last_os_error();
             if -1 == result {
