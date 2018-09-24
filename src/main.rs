@@ -135,7 +135,7 @@ fn main() {
     let mut events = Events::with_capacity(1024);
 
     let mut console = unsafe { File::from_raw_fd(0) };
-    let ForkResult { child_pid, mut pty_master, pty_slave: _pty_slave } = setup().unwrap();
+    let ForkResult { child_pid, mut pty_master, pty_slave } = setup().unwrap();
 
     let names = ["console", "pty"];
 
@@ -197,6 +197,11 @@ fn main() {
         }
     }
 
+    debug!("dropping pty fds");
+    mem::drop(pty_master);
+    mem::drop(pty_slave);
+
+    debug!("waiting on child");
     let mut child_status = 0;
     checkerr(unsafe { libc::waitpid(child_pid, &mut child_status, 0) }, "waitpid")
         .unwrap();
