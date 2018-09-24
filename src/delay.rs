@@ -24,7 +24,7 @@ impl Delay {
     }
 
     pub fn sleep(&self) -> io::Result<()> {
-        let mut delay = self.ts.clone();
+        let mut delay = self.ts;
         loop {
             let mut remaining = unsafe { std::mem::zeroed::<libc::timespec>() };
             match unsafe { libc::nanosleep(&delay, &mut remaining) } {

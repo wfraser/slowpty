@@ -94,7 +94,7 @@ fn setup() -> io::Result<ForkResult> {
 
         let mut args = std::env::args_os().skip(2);
         let mut cmd = exec::Command::new(args.next().unwrap());
-        while let Some(arg) = args.next() {
+        for arg in args {
             cmd.arg(arg);
         }
         panic!(cmd.exec());
@@ -165,7 +165,7 @@ fn main() {
                 Ok(1) => {
                     debug!("got {:?}", buf[0] as char);
 
-                    dest.write(&buf).unwrap();
+                    dest.write_all(&buf).unwrap();
 
                     delay.sleep()
                         .unwrap_or_else(|e| {

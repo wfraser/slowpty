@@ -3,7 +3,6 @@ use libc;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::ptr;
 
 use ::checkerr;
 
@@ -21,7 +20,7 @@ pub fn open_pty_pair() -> io::Result<PtyPair> {
     checkerr(unsafe { libc::unlockpt(master.as_raw_fd()) }, "unlockpt")?;
 
     let slavename: *const libc::c_char = unsafe { libc::ptsname(master.as_raw_fd()) };
-    if slavename == ptr::null() {
+    if slavename.is_null() {
         let e = io::Error::last_os_error();
         eprintln!("ptsname: {}", e);
         return Err(e);
