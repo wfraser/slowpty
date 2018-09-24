@@ -62,8 +62,6 @@ fn setup() -> io::Result<ForkResult> {
         // Normally, we'd close the slave end of the pty at this point, but on macOS it's observed
         // that when the child exits and closes its slave end, the pty drops all buffered input
         // unless we also hold it open by keeping another FD to it.
-        // On Linux, we can use fcntl(F_SETPIPE_SZ, 1) to eliminate the buffer entirely, but macOS
-        // does not support this fcntl, so we have to do this instead.
         //mem::drop(slave);
 
         term::save_term_settings(0)?;
