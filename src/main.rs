@@ -59,15 +59,17 @@ fn setup() -> io::Result<ForkResult> {
     if pid != 0 {
         // parent
 
-        let returned_slave = if cfg!(target_os = "darwin") {
+        let returned_slave = if cfg!(target_os = "macos") {
             // On macOS, it's observed that when the child exits and closes its slave end, the pty
             // drops all buffered data unless we hold it open by keeping another FD to it.
+            debug!("keeping the pty slave open");
             Some(slave)
         } else {
             // On Linux, keeping a FD of the slave open is actively harmful and prevents us from
             // getting a HUP signal or the pty master from returning EWOULDBLOCK at all, which
             // results in us hanging when the child exits.
             // Other unixes? Who knows; haven't tested it. But this behavior seems more reasonable.
+            debug!("dropping the pty slave");
             mem::drop(slave);
             None
         };
