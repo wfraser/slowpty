@@ -164,11 +164,15 @@ fn main() {
                 }
                 Ok(1) => {
                     debug!("got {:?}", buf[0] as char);
+
                     dest.write(&buf).unwrap();
+
+                    delay.sleep()
+                        .unwrap_or_else(|e| {
+                            error!("delay error: {}", e);
+                        });
                 }
-                Ok(_) => {
-                    panic!("multiple bytes!");
-                }
+                Ok(_) => unreachable!(),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     debug!("wouldblock from {}", names[index]);
                 }
@@ -176,11 +180,6 @@ fn main() {
                     panic!("read error {}", e);
                 }
             }
-
-            delay.sleep()
-                .unwrap_or_else(|e| {
-                    error!("delay error: {}", e);
-                });
         }
     }
 
