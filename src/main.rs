@@ -40,8 +40,20 @@ fn set_nonblocking(f: &mut File) -> io::Result<()> {
         if libc::fcntl(fd, libc::F_SETFL, new) < 0 {
             return Err(io::Error::last_os_error());
         }
-	}
-	Ok(())
+    }
+    Ok(())
+}
+
+fn signal_name(n: i32) -> std::borrow::Cow<'static, str> {
+    extern "C" { fn strsignal(sig: libc::c_int) -> *const libc::c_char; }
+    unsafe {
+        let ptr = strsignal(n);
+        if ptr.is_null() {
+            std::borrow::Cow::Owned(format!("<unknown>: {}", n))
+        } else {
+            std::ffi::CStr::from_ptr(ptr).to_string_lossy()
+        }
+    }
 }
 
 struct ForkResult {
@@ -217,11 +229,13 @@ fn main() {
                 std::process::exit(exit_code);
             } else if libc::WIFSIGNALED(child_status) {
                 let sig = libc::WTERMSIG(child_status);
-                error!("child killed by signal {}", sig);
+                let name = signal_name(sig);
+                error!("child killed by signal: {}", name);
+                std::process::exit(128 + sig);
             } else {
                 error!("something happened to the child, status {}", child_status);
+                std::process::exit(-1);
             }
-            std::process::exit(-1);
         }
     } else {
         debug!("child exited cleanly");
