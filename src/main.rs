@@ -141,6 +141,10 @@ fn main() {
             eprintln!("error: invalid number for the rate: {}", e);
             exit(2);
         });
+    if rate <= 0. {
+        eprintln!("error: rate must be greater than zero.");
+        exit(2);
+    }
     let delay = Delay::from_rate(rate);
 
     let poll = Poll::new().unwrap();
@@ -161,7 +165,7 @@ fn main() {
             .unwrap();
     }
 
-    'event: loop {
+    'poll: loop {
         poll.poll(&mut events, None).unwrap();
         debug!("poll returned");
 
@@ -170,8 +174,9 @@ fn main() {
 
             let readiness = UnixReady::from(event.readiness());
             if readiness.is_hup() && !readiness.is_readable() {
+                // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
                 debug!("breaking out");
-                break 'event;
+                break 'poll;
             }
 
             let index = event.token().0 as usize;
@@ -186,12 +191,15 @@ fn main() {
             match source.read(&mut buf) {
                 Ok(0) => {
                     debug!("zero bytes from {}", names[index]);
-                    break 'event;
+                    break 'poll;
                 }
                 Ok(1) => {
                     debug!("got {:?}", buf[0] as char);
 
-                    dest.write_all(&buf).unwrap();
+                    if let Err(e) = dest.write_all(&buf) {
+                        error!("write error: {}", e);
+                        break 'poll;
+                    }
 
                     delay.sleep()
                         .unwrap_or_else(|e| {
@@ -200,6 +208,7 @@ fn main() {
                 }
                 Ok(_) => unreachable!(),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // Spurious event; ignore and continue.
                     debug!("wouldblock from {}", names[index]);
                 }
                 Err(ref e) => {
