@@ -140,7 +140,11 @@ fn setup() -> io::Result<ForkResult> {
         for arg in args {
             cmd.arg(arg);
         }
-        panic!(cmd.exec());
+        let e = cmd.exec();
+
+        // If we get here, there's been an error launching the command.
+        eprintln!("{}: {}", std::env::args().next().unwrap(), e);
+        exit(101);
     }
 }
 
