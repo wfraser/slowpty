@@ -44,16 +44,39 @@ fn set_nonblocking(f: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-fn signal_name(n: i32) -> std::borrow::Cow<'static, str> {
+fn signal_name(n: i32) -> String {
     extern "C" { fn strsignal(sig: libc::c_int) -> *const libc::c_char; }
     unsafe {
         let ptr = strsignal(n);
         if ptr.is_null() {
-            std::borrow::Cow::Owned(format!("<unknown>: {}", n))
+            format!("Unknown signal {}", n)
         } else {
-            std::ffi::CStr::from_ptr(ptr).to_string_lossy()
+            let original = std::ffi::CStr::from_ptr(ptr)
+                .to_string_lossy();
+
+            if original.contains("Unknown") {
+                // Usually of the form "Unknown signal <n>", so keep the original form.
+                original.into_owned()
+            } else {
+                // Sometimes of the form "<signal name>: <n>", so strip off the colon and
+                // everything after it.
+                original
+                    .split(": ")
+                    .next()
+                    .unwrap()
+                    .to_owned()
+            }
         }
     }
+}
+
+#[test]
+fn test_signal_name() {
+    assert!(signal_name(libc::SIGKILL).to_lowercase().contains("kill"));
+    assert!(!signal_name(9).contains("9"));
+    assert!(signal_name(-1).contains("-1"));
+    assert!(signal_name(0).contains("0"));
+    assert!(signal_name(999).contains("999"));
 }
 
 struct ForkResult {
