@@ -156,10 +156,10 @@ fn main() {
         || args[1] == "--help"
         || args[1] == "-h"
     {
+        eprintln!(concat!("slowpty (rust,mio) v", env!("CARGO_PKG_VERSION")));
         eprintln!("usage: {} <rate> <program> [<args>...]", args[0]);
-        eprintln!("  run the given program, limiting I/O to the specified number of\
-                     bytes per\n
-                   second.");
+        eprintln!("  run the given program, limiting I/O to the specified number of bytes per \
+                  second.");
         exit(2);
     }
 
