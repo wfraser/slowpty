@@ -2,7 +2,7 @@ use libc;
 use std;
 use std::io;
 
-pub const SEC_NS: i64 = 1_000_000_000;
+pub const SEC_NS: i32 = 1_000_000_000;
 
 pub struct Delay {
     ts: libc::timespec,
@@ -10,15 +10,15 @@ pub struct Delay {
 
 impl Delay {
     pub fn from_rate(rate: f64) -> Self {
-        let delay_nanos = (SEC_NS as f64 / rate) as i64;
+        let delay_nanos = (SEC_NS as f64 / rate) as i32;
         Delay::from_nanos(delay_nanos)
     }
 
-    pub fn from_nanos(nanos: i64) -> Self {
+    pub fn from_nanos(nanos: i32) -> Self {
         Delay {
             ts: libc::timespec {
-                tv_sec: nanos / SEC_NS,
-                tv_nsec: nanos % SEC_NS,
+                tv_sec: libc::time_t::from(nanos / SEC_NS),
+                tv_nsec: libc::c_long::from(nanos % SEC_NS),
             },
         }
     }
