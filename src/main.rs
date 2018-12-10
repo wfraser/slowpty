@@ -30,42 +30,38 @@ pub fn checkerr(result: i32, msg: &str) -> io::Result<i32> {
 }
 
 fn set_nonblocking(f: &mut File) -> io::Result<()> {
-    unsafe {
-        let fd = f.as_raw_fd();
-        let previous = libc::fcntl(fd, libc::F_GETFL);
-        if previous < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let new = previous | libc::O_NONBLOCK;
-        if libc::fcntl(fd, libc::F_SETFL, new) < 0 {
-            return Err(io::Error::last_os_error());
-        }
+    let fd = f.as_raw_fd();
+    let previous = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if previous < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let new = previous | libc::O_NONBLOCK;
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, new) } < 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
 fn signal_name(n: i32) -> String {
     extern "C" { fn strsignal(sig: libc::c_int) -> *const libc::c_char; }
-    unsafe {
-        let ptr = strsignal(n);
-        if ptr.is_null() {
-            format!("Unknown signal {}", n)
-        } else {
-            let original = std::ffi::CStr::from_ptr(ptr)
-                .to_string_lossy();
+    let ptr = unsafe { strsignal(n) };
+    if ptr.is_null() {
+        format!("Unknown signal {}", n)
+    } else {
+        let original = unsafe { std::ffi::CStr::from_ptr(ptr) }
+            .to_string_lossy();
 
-            if original.contains("Unknown") {
-                // Usually of the form "Unknown signal <n>", so keep the original form.
-                original.into_owned()
-            } else {
-                // Sometimes of the form "<signal name>: <n>", so strip off the colon and
-                // everything after it.
-                original
-                    .split(": ")
-                    .next()
-                    .unwrap()
-                    .to_owned()
-            }
+        if original.contains("Unknown") {
+            // Usually of the form "Unknown signal <n>", so keep the original form.
+            original.into_owned()
+        } else {
+            // Sometimes of the form "<signal name>: <n>", so strip off the colon and
+            // everything after it.
+            original
+                .split(": ")
+                .next()
+                .unwrap()
+                .to_owned()
         }
     }
 }
@@ -258,21 +254,22 @@ fn main() {
     term::reset_tty();
 
     if child_status != 0 {
-        unsafe {
+        let exit_code = unsafe {
             if libc::WIFEXITED(child_status) {
                 let exit_code = libc::WEXITSTATUS(child_status);
                 error!("child exited with {}", exit_code);
-                std::process::exit(exit_code);
+                exit_code
             } else if libc::WIFSIGNALED(child_status) {
                 let sig = libc::WTERMSIG(child_status);
                 let name = signal_name(sig);
                 error!("child killed by signal: {}", name);
-                std::process::exit(128 + sig);
+                128 + sig
             } else {
                 error!("something happened to the child, status {}", child_status);
-                std::process::exit(-1);
+                -1
             }
-        }
+        };
+        std::process::exit(exit_code);
     } else {
         debug!("child exited cleanly");
     }
