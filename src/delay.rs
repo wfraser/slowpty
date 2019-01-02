@@ -10,7 +10,7 @@ pub struct Delay {
 
 impl Delay {
     pub fn from_rate(rate: f64) -> Self {
-        let delay_nanos = (SEC_NS as f64 / rate) as i32;
+        let delay_nanos = (f64::from(SEC_NS) / rate) as i32;
         Delay::from_nanos(delay_nanos)
     }
 

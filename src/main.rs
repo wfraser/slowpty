@@ -170,76 +170,10 @@ fn main() {
     }
     let delay = Delay::from_rate(rate);
 
-    let poll = Poll::new().unwrap();
-    let mut events = Events::with_capacity(1024);
-
     let mut console = unsafe { File::from_raw_fd(0) };
     let ForkResult { child_pid, mut pty_master, pty_slave } = setup().unwrap();
 
-    let names = ["console", "pty"];
-
-    for (i, mut f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
-        set_nonblocking(f).unwrap();
-        poll.register(
-                &EventedFd(&f.as_raw_fd()),
-                Token(i),
-                Ready::readable() | UnixReady::error() | UnixReady::hup(),
-                PollOpt::level())
-            .unwrap();
-    }
-
-    'poll: loop {
-        poll.poll(&mut events, None).unwrap();
-        debug!("poll returned");
-
-        for event in &events {
-            debug!("{:?}", event);
-
-            let readiness = UnixReady::from(event.readiness());
-            if readiness.is_hup() && !readiness.is_readable() {
-                // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
-                debug!("breaking out");
-                break 'poll;
-            }
-
-            let index = event.token().0 as usize;
-            let (source, dest) = if index == 0 {
-                (&mut console, &mut pty_master)
-            } else {
-                (&mut pty_master, &mut console)
-            };
-
-            let mut buf = [0u8];
-
-            match source.read(&mut buf) {
-                Ok(0) => {
-                    debug!("zero bytes from {}", names[index]);
-                    break 'poll;
-                }
-                Ok(1) => {
-                    debug!("got {:?}", buf[0] as char);
-
-                    if let Err(e) = dest.write_all(&buf) {
-                        error!("write error: {}", e);
-                        break 'poll;
-                    }
-
-                    delay.sleep()
-                        .unwrap_or_else(|e| {
-                            error!("delay error: {}", e);
-                        });
-                }
-                Ok(_) => unreachable!(),
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // Spurious event; ignore and continue.
-                    debug!("wouldblock from {}", names[index]);
-                }
-                Err(ref e) => {
-                    panic!("read error {}", e);
-                }
-            }
-        }
-    }
+    event_loop(delay, &mut console, &mut pty_master);
 
     debug!("dropping pty fds");
     mem::drop(pty_master);
@@ -275,4 +209,72 @@ fn main() {
     }
 
     debug!("returning from main");
+}
+
+fn event_loop<'a>(delay: Delay, mut console: &'a mut File, mut pty_master: &'a mut File) {
+    let poll = Poll::new().unwrap();
+    for (i, mut f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
+        set_nonblocking(f).unwrap();
+        poll.register(
+                &EventedFd(&f.as_raw_fd()),
+                Token(i),
+                Ready::readable() | UnixReady::error() | UnixReady::hup(),
+                PollOpt::level())
+            .unwrap();
+    }
+
+    let names = ["console", "pty"];
+    let mut events = Events::with_capacity(1024);
+    loop {
+        poll.poll(&mut events, None).unwrap();
+        debug!("poll returned");
+
+        for event in &events {
+            debug!("{:?}", event);
+
+            let readiness = UnixReady::from(event.readiness());
+            if readiness.is_hup() && !readiness.is_readable() {
+                // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
+                debug!("breaking out");
+                return;
+            }
+
+            let index = event.token().0 as usize;
+            let (source, dest) = if index == 0 {
+                (&mut console, &mut pty_master)
+            } else {
+                (&mut pty_master, &mut console)
+            };
+
+            let mut buf = [0u8];
+
+            match source.read(&mut buf) {
+                Ok(0) => {
+                    debug!("zero bytes from {}", names[index]);
+                    return;
+                }
+                Ok(1) => {
+                    debug!("got {:?}", buf[0] as char);
+
+                    if let Err(e) = dest.write_all(&buf) {
+                        error!("write error: {}", e);
+                        return;
+                    }
+
+                    delay.sleep()
+                        .unwrap_or_else(|e| {
+                            error!("delay error: {}", e);
+                        });
+                }
+                Ok(_) => unreachable!(),
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // Spurious event; ignore and continue.
+                    debug!("wouldblock from {}", names[index]);
+                }
+                Err(ref e) => {
+                    panic!("read error {}", e);
+                }
+            }
+        }
+    }
 }
