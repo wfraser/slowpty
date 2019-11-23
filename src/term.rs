@@ -45,7 +45,7 @@ pub fn restore_term_settings_at_exit() -> io::Result<()> {
 }
 
 pub fn set_controlling_tty(fd: RawFd) -> io::Result<()> {
-    checkerr(unsafe { libc::ioctl(fd, libc::c_ulong::from(libc::TIOCSCTTY), 1) }, "ioctl(TIOCSCTTY)")
+    checkerr(unsafe { libc::ioctl(fd, libc::TIOCSCTTY, 1) }, "ioctl(TIOCSCTTY)")
         .map(|_| ())
 }
 
