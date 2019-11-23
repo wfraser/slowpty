@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
-use ::checkerr;
+use crate::checkerr;
 
 pub struct PtyPair {
     pub master: File,

@@ -1,8 +1,4 @@
-extern crate env_logger;
-extern crate exec;
-extern crate libc;
 #[macro_use] extern crate log;
-extern crate mio;
 
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -213,7 +209,7 @@ fn main() {
 
 fn event_loop<'a>(delay: Delay, mut console: &'a mut File, mut pty_master: &'a mut File) {
     let poll = Poll::new().unwrap();
-    for (i, mut f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
+    for (i, f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
         set_nonblocking(f).unwrap();
         poll.register(
                 &EventedFd(&f.as_raw_fd()),

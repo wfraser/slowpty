@@ -3,7 +3,7 @@ use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
 
-use ::checkerr;
+use crate::checkerr;
 
 static mut ORIGINAL_TERM_SETTINGS: Option<libc::termios> = None;
 
