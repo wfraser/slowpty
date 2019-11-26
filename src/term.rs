@@ -45,7 +45,8 @@ pub fn restore_term_settings_at_exit() -> io::Result<()> {
 }
 
 pub fn set_controlling_tty(fd: RawFd) -> io::Result<()> {
-    checkerr(unsafe { libc::ioctl(fd, libc::TIOCSCTTY, 1) }, "ioctl(TIOCSCTTY)")
+    #[allow(clippy::identity_conversion)] // it isn't identical on all platforms
+    checkerr(unsafe { libc::ioctl(fd, libc::TIOCSCTTY.into(), 1) }, "ioctl(TIOCSCTTY)")
         .map(|_| ())
 }
 
