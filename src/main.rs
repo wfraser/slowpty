@@ -6,8 +6,8 @@ use std::mem;
 use std::os::unix::io::{FromRawFd, AsRawFd, RawFd};
 use std::process::exit;
 
-use mio::{Events, Poll, Ready, PollOpt, Token};
-use mio::unix::{EventedFd, UnixReady};
+use mio::{Events, Poll, Interest, Token};
+use mio::unix::SourceFd;
 
 mod delay;
 mod pty;
@@ -208,69 +208,84 @@ fn main() {
 }
 
 fn event_loop<'a>(delay: Delay, mut console: &'a mut File, mut pty_master: &'a mut File) {
-    let poll = Poll::new().unwrap();
+    let mut poll = Poll::new().unwrap();
     for (i, f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
         set_nonblocking(f).unwrap();
-        poll.register(
-                &EventedFd(&f.as_raw_fd()),
+        poll.registry()
+            .register(
+                &mut SourceFd(&f.as_raw_fd()),
                 Token(i),
-                Ready::readable() | UnixReady::error() | UnixReady::hup(),
-                PollOpt::level())
+                Interest::READABLE,
+            )
             .unwrap();
     }
 
     let names = ["console", "pty"];
     let mut events = Events::with_capacity(1024);
     loop {
+        debug!("poll");
         poll.poll(&mut events, None).unwrap();
-        debug!("poll returned");
 
-        for event in &events {
-            debug!("{:?}", event);
+        let mut events = events.into_iter().collect::<Vec<_>>();
+        let mut rm_idx = vec![];
+        debug!("poll returned {} events", events.len());
 
-            let readiness = UnixReady::from(event.readiness());
-            if readiness.is_hup() && !readiness.is_readable() {
-                // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
-                debug!("breaking out");
-                return;
-            }
+        while !events.is_empty() {
 
-            let index = event.token().0 as usize;
-            let (source, dest) = if index == 0 {
-                (&mut console, &mut pty_master)
-            } else {
-                (&mut pty_master, &mut console)
-            };
+            for (event_idx, event) in events.iter().enumerate() {
+                debug!("{:?}", event);
 
-            let mut buf = [0u8];
-
-            match source.read(&mut buf) {
-                Ok(0) => {
-                    debug!("zero bytes from {}", names[index]);
+                if event.is_read_closed() && !event.is_readable() {
+                    // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
+                    debug!("breaking out");
+                    // TODO: should we remove the event and poll again?
                     return;
                 }
-                Ok(1) => {
-                    debug!("got {:?}", buf[0] as char);
 
-                    if let Err(e) = dest.write_all(&buf) {
-                        error!("write error: {}", e);
+                let index = event.token().0 as usize;
+                let (source, dest) = if index == 0 {
+                    (&mut console, &mut pty_master)
+                } else {
+                    (&mut pty_master, &mut console)
+                };
+
+                let mut buf = [0u8];
+
+                match source.read(&mut buf) {
+                    Ok(0) => {
+                        debug!("zero bytes from {}", names[index]);
                         return;
                     }
+                    Ok(1) => {
+                        debug!("got {:?}", buf[0] as char);
 
-                    delay.sleep()
-                        .unwrap_or_else(|e| {
-                            error!("delay error: {}", e);
-                        });
-                }
-                Ok(_) => unreachable!(),
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    // Spurious event; ignore and continue.
-                    debug!("wouldblock from {}", names[index]);
-                }
-                Err(ref e) => {
-                    panic!("read error {}", e);
+                        if let Err(e) = dest.write_all(&buf) {
+                            error!("write error: {}", e);
+                            return;
+                        }
+
+                        delay.sleep()
+                            .unwrap_or_else(|e| {
+                                error!("delay error: {}", e);
+                            });
+                    }
+                    Ok(_) => unreachable!(),
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        // Spurious event; ignore and continue.
+                        debug!("wouldblock from {}", names[index]);
+                        rm_idx.push(event_idx);
+                    }
+                    Err(ref e) => {
+                        panic!("read error {}", e);
+                    }
                 }
             }
-        }
-    }
+
+            for idx in rm_idx.iter().rev().cloned() {
+                debug!("removing event {}: {:?}", idx, events[idx]);
+                events.swap_remove(idx);
+                debug!("now {} events left", events.len());
+            }
+        } // while !events.is_empty
+    } // poll loop
 }
