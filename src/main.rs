@@ -78,7 +78,7 @@ struct ForkResult {
 }
 
 fn setup() -> io::Result<ForkResult> {
-    let window_size = term::WindowSize::get_from_fd(0)?;
+    let window_size = term::WindowSize::from_fd(0)?;
 
     let pty::PtyPair { master, slave } = pty::open_pty_pair()?;
 

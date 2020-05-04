@@ -31,7 +31,7 @@ pub fn set_raw(fd: RawFd) -> io::Result<()> {
 pub fn save_term_settings(fd: RawFd) -> io::Result<()> {
     let mut settings: libc::termios = unsafe { mem::zeroed() };
     checkerr(unsafe { libc::tcgetattr(fd, &mut settings) },
-        "tcgetattr(original settings")?;
+        "tcgetattr(original settings)")?;
 
     unsafe { ORIGINAL_TERM_SETTINGS = Some(settings); }
 
@@ -59,7 +59,7 @@ pub struct WindowSize {
 }
 
 impl WindowSize {
-    pub fn get_from_fd(fd: RawFd) -> io::Result<Self> {
+    pub fn from_fd(fd: RawFd) -> io::Result<Self> {
         let mut ws: libc::winsize = unsafe { mem::zeroed() };
         checkerr(unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut _) },
             "ioctl(TIOCGWINSZ)")?;
