@@ -1,19 +1,20 @@
+#[macro_use] extern crate anyhow;
 #[macro_use] extern crate log;
 
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::os::unix::io::{FromRawFd, AsRawFd, RawFd};
 use std::process::exit;
 
-use mio::{Events, Poll, Interest, Token};
-use mio::unix::SourceFd;
-
 mod delay;
 mod pty;
+mod readable;
 mod term;
 
 use delay::Delay;
+use readable::{PollEndpoint, PollResult, ReadableSet};
 
 pub fn checkerr(result: i32, msg: &str) -> io::Result<i32> {
     if result == -1 {
@@ -23,19 +24,6 @@ pub fn checkerr(result: i32, msg: &str) -> io::Result<i32> {
     } else {
         Ok(result)
     }
-}
-
-fn set_nonblocking(f: &mut File) -> io::Result<()> {
-    let fd = f.as_raw_fd();
-    let previous = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if previous < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let new = previous | libc::O_NONBLOCK;
-    if unsafe { libc::fcntl(fd, libc::F_SETFL, new) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 fn signal_name(n: i32) -> String {
@@ -207,85 +195,67 @@ fn main() {
     debug!("returning from main");
 }
 
-fn event_loop<'a>(delay: Delay, mut console: &'a mut File, mut pty_master: &'a mut File) {
-    let mut poll = Poll::new().unwrap();
-    for (i, f) in [&mut console, &mut pty_master].iter_mut().enumerate() {
-        set_nonblocking(f).unwrap();
-        poll.registry()
-            .register(
-                &mut SourceFd(&f.as_raw_fd()),
-                Token(i),
-                Interest::READABLE,
-            )
-            .unwrap();
-    }
+fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File) -> Result<()> {
+    let mut readable_set = ReadableSet::new(console, pty_master).expect("creating readable set");
 
-    let names = ["console", "pty"];
-    let mut events = Events::with_capacity(1024);
     loop {
-        debug!("poll");
-        poll.poll(&mut events, None).unwrap();
-
-        let mut events = events.into_iter().collect::<Vec<_>>();
-        let mut rm_idx = vec![];
-        debug!("poll returned {} events", events.len());
-
-        while !events.is_empty() {
-
-            for (event_idx, event) in events.iter().enumerate() {
-                debug!("{:?}", event);
-
-                if event.is_read_closed() && !event.is_readable() {
-                    // Don't try to read in this state. Even with O_NONBLOCK set, it may still block.
-                    debug!("breaking out");
-                    // TODO: should we remove the event and poll again?
-                    return;
-                }
-
-                let index = event.token().0 as usize;
-                let (source, dest) = if index == 0 {
-                    (&mut console, &mut pty_master)
-                } else {
-                    (&mut pty_master, &mut console)
-                };
-
-                let mut buf = [0u8];
-
-                match source.read(&mut buf) {
-                    Ok(0) => {
-                        debug!("zero bytes from {}", names[index]);
-                        return;
-                    }
-                    Ok(1) => {
-                        debug!("got {:?}", buf[0] as char);
-
-                        if let Err(e) = dest.write_all(&buf) {
-                            error!("write error: {}", e);
-                            return;
-                        }
-
-                        delay.sleep()
-                            .unwrap_or_else(|e| {
-                                error!("delay error: {}", e);
-                            });
-                    }
-                    Ok(_) => unreachable!(),
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        // Spurious event; ignore and continue.
-                        debug!("wouldblock from {}", names[index]);
-                        rm_idx.push(event_idx);
-                    }
-                    Err(ref e) => {
-                        panic!("read error {}", e);
-                    }
+        if readable_set.is_empty() {
+            // No readable endpoints. Stop the busy-polling and block until one of them becomes
+            // ready.
+            match readable_set.block().expect("blocking for events") {
+                PollResult::Ok => (),
+                PollResult::Closed => {
+                    // One of the endpoints closed; no point in continuing.
+                    debug!("bailing out");
+                    return Ok(());
                 }
             }
+        }
 
-            for idx in rm_idx.iter().rev().cloned() {
-                debug!("removing event {}: {:?}", idx, events[idx]);
-                events.swap_remove(idx);
-                debug!("now {} events left", events.len());
+        // At this point we have at least one readable endpoint. For fairness, always try to read
+        // from both endpoints on each iteration, so that an intermittently-readable endpoint
+        // doesn't get blocked by an always-readable one.
+
+        let mut unset: Vec<usize> = vec![];
+        for idx in 0 ..= 1 {
+            let PollEndpoint { name, ref mut src, ref mut dst } = readable_set.endpoint(idx)
+                .unwrap();
+            let mut buf = [0u8];
+
+            match src.read(&mut buf) {
+                Ok(0) => {
+                    debug!("zero bytes from {}", name);
+                    return Ok(());
+                }
+                Ok(1) => {
+                    debug!("got {:?}", buf[0] as char);
+
+                    if let Err(e) = dst.write_all(&buf) {
+                        return Err(e).context("write error");
+                    }
+                }
+                Ok(_) => unreachable!(),
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // Done reading from this source.
+                    unset.push(idx);
+                }
+                Err(ref e) if e.raw_os_error() == Some(libc::EIO) => {
+                    // Not sure exactly what causes this.
+                    warn!("EIO from {}", name);
+                    return Ok(());
+                }
+                Err(ref e) => {
+                    panic!("read error {}", e);
+                }
             }
-        } // while !events.is_empty
-    } // poll loop
+        }
+
+        for idx in unset {
+            readable_set.unset(idx);
+        }
+
+        // This is a full-duplex connection: a read can happen from both endpoints for a single
+        // delay cycle.
+        delay.sleep().context("delay error")?;
+    }
 }
