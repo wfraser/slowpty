@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::io;
 
 pub const SEC_NS: i32 = 1_000_000_000;
@@ -21,7 +22,7 @@ impl Delay {
         }
     }
 
-    pub fn sleep(&self) -> io::Result<()> {
+    pub fn sleep(&self) -> Result<()> {
         let mut delay = self.ts;
         loop {
             let mut remaining: libc::timespec = unsafe { std::mem::zeroed() };
@@ -33,8 +34,7 @@ impl Delay {
                         delay.tv_sec = remaining.tv_sec;
                         delay.tv_nsec = remaining.tv_nsec;
                     } else {
-                        eprintln!("nanosleep: {}", e);
-                        return Err(e);
+                        return Err(e).context("nanosleep");
                     }
                 }
             }

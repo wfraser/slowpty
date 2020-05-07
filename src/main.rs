@@ -16,11 +16,10 @@ mod term;
 use delay::Delay;
 use readable::{PollEndpoint, PollResult, ReadableSet};
 
-pub fn checkerr(result: i32, msg: &str) -> io::Result<i32> {
+pub fn checkerr(result: i32, msg: &'static str) -> Result<i32> {
     if result == -1 {
         let e = io::Error::last_os_error();
-        error!("{}: {}", msg, e);
-        Err(e)
+        Err(e).context(msg)
     } else {
         Ok(result)
     }
@@ -65,8 +64,8 @@ struct ForkResult {
     pty_slave: Option<File>,
 }
 
-fn setup() -> io::Result<ForkResult> {
-    let window_size = term::WindowSize::from_fd(0)?;
+fn setup() -> Result<ForkResult> {
+    let window_size = term::WindowSize::from_fd(0).context("failed to get terminal size")?;
 
     let pty::PtyPair { master, slave } = pty::open_pty_pair()?;
 
@@ -128,7 +127,7 @@ fn setup() -> io::Result<ForkResult> {
     }
 }
 
-fn main() {
+fn main() -> Result<()> {
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
@@ -155,9 +154,10 @@ fn main() {
     let delay = Delay::from_rate(rate);
 
     let mut console = unsafe { File::from_raw_fd(0) };
-    let ForkResult { child_pid, mut pty_master, pty_slave } = setup().unwrap();
+    let ForkResult { child_pid, mut pty_master, pty_slave } = setup()
+        .context("failed to setup PTY")?;
 
-    event_loop(delay, &mut console, &mut pty_master);
+    event_loop(delay, &mut console, &mut pty_master)?;
 
     debug!("dropping pty fds");
     mem::drop(pty_master);
@@ -166,7 +166,7 @@ fn main() {
     debug!("waiting on child");
     let mut child_status = 0;
     checkerr(unsafe { libc::waitpid(child_pid, &mut child_status, 0) }, "waitpid")
-        .unwrap();
+        .context("error waiting for child process")?;
 
     debug!("resetting tty settings");
     term::reset_tty();
@@ -193,6 +193,7 @@ fn main() {
     }
 
     debug!("returning from main");
+    Ok(())
 }
 
 fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File) -> Result<()> {

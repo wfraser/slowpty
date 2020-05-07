@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -9,7 +10,7 @@ pub struct PtyPair {
     pub slave: File,
 }
 
-pub fn open_pty_pair() -> io::Result<PtyPair> {
+pub fn open_pty_pair() -> Result<PtyPair> {
     let master = unsafe {
         File::from_raw_fd(checkerr(libc::posix_openpt(libc::O_RDWR), "posix_openpt")?)
     };
@@ -21,7 +22,7 @@ pub fn open_pty_pair() -> io::Result<PtyPair> {
     if slavename.is_null() {
         let e = io::Error::last_os_error();
         eprintln!("ptsname: {}", e);
-        return Err(e);
+        return Err(e).context("ptsname");
     }
 
     let slave = unsafe {
