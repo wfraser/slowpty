@@ -221,15 +221,15 @@ fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File)
         for idx in 0 ..= 1 {
             let PollEndpoint { name, ref mut src, ref mut dst } = readable_set.endpoint(idx)
                 .unwrap();
-            let mut buf = [0u8];
 
+            let mut buf = [0u8];
             match src.read(&mut buf) {
                 Ok(0) => {
-                    debug!("zero bytes from {}", name);
+                    debug!("{}: read zero bytes", name);
                     return Ok(());
                 }
                 Ok(1) => {
-                    debug!("got {:?}", buf[0] as char);
+                    debug!("{}: got {:?}", name, buf[0] as char);
 
                     if let Err(e) = dst.write_all(&buf) {
                         return Err(e).context("write error");
@@ -238,15 +238,16 @@ fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File)
                 Ok(_) => unreachable!(),
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     // Done reading from this source.
+                    debug!("{}: would block", name);
                     unset.push(idx);
                 }
                 Err(ref e) if e.raw_os_error() == Some(libc::EIO) => {
                     // Not sure exactly what causes this.
-                    warn!("EIO from {}", name);
+                    warn!("{}: EIO", name);
                     return Ok(());
                 }
                 Err(ref e) => {
-                    panic!("read error {}", e);
+                    panic!("{}: read error: {}", name, e);
                 }
             }
         }
