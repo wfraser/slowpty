@@ -1,13 +1,13 @@
 [package]
 name = "slowpty"
-version = "1.2.0"
+version = "1.2.1"
 authors = ["William R. Fraser <wfraser@codewise.org>"]
 edition = "2018"
 
 [dependencies]
 anyhow = "1.0"
-env_logger = "0.7"
+env_logger = "0.9"
 exec = "0.3"
 libc = "0.2"
 log = "0.4"
-mio = { version = "0.7", features = ["os-poll", "os-util"] }
+mio = { version = "0.8", features = ["os-ext", "os-poll"] }

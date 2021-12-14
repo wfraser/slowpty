@@ -172,20 +172,18 @@ fn main() -> Result<()> {
     term::reset_tty();
 
     if child_status != 0 {
-        let exit_code = unsafe {
-            if libc::WIFEXITED(child_status) {
-                let exit_code = libc::WEXITSTATUS(child_status);
-                error!("child exited with {}", exit_code);
-                exit_code
-            } else if libc::WIFSIGNALED(child_status) {
-                let sig = libc::WTERMSIG(child_status);
-                let name = signal_name(sig);
-                error!("child killed by signal: {}", name);
-                128 + sig
-            } else {
-                error!("something happened to the child, status {}", child_status);
-                -1
-            }
+        let exit_code = if libc::WIFEXITED(child_status) {
+            let child_exit = libc::WEXITSTATUS(child_status);
+            error!("child exited with {}", child_exit);
+            child_exit
+        } else if libc::WIFSIGNALED(child_status) {
+            let sig = libc::WTERMSIG(child_status);
+            let name = signal_name(sig);
+            error!("child killed by signal: {}", name);
+            128 + sig
+        } else {
+            error!("something happened to the child, status {}", child_status);
+            -1
         };
         std::process::exit(exit_code);
     } else {
