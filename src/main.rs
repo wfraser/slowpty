@@ -52,9 +52,9 @@ fn signal_name(n: i32) -> String {
 #[test]
 fn test_signal_name() {
     assert!(signal_name(libc::SIGKILL).to_lowercase().contains("kill"));
-    assert!(!signal_name(9).contains("9"));
+    assert!(!signal_name(9).contains('9'));
     assert!(signal_name(-1).contains("-1"));
-    assert!(signal_name(0).contains("0"));
+    assert!(signal_name(0).contains('0'));
     assert!(signal_name(999).contains("999"));
 }
 
