@@ -83,7 +83,7 @@ impl<'a> ReadableSet<'a> {
 
         for event in events.into_iter() {
             debug!("{:?}", event);
-            let index = event.token().0 as usize;
+            let index = event.token().0;
 
             if event.is_read_closed() && !event.is_readable() {
                 // Don't even try to read in this state. Even with O_NONBLOCK set, it may still

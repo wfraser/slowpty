@@ -29,7 +29,7 @@ fn signal_name(n: i32) -> String {
     extern "C" { fn strsignal(sig: libc::c_int) -> *const libc::c_char; }
     let ptr = unsafe { strsignal(n) };
     if ptr.is_null() {
-        format!("Unknown signal {}", n)
+        format!("Unknown signal {n}")
     } else {
         let original = unsafe { std::ffi::CStr::from_ptr(ptr) }
             .to_string_lossy();
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
 
     let rate: f64 = args[1].parse()
         .unwrap_or_else(|e| {
-            eprintln!("error: invalid number for the rate: {}", e);
+            eprintln!("error: invalid number for the rate: {e}");
             exit(2);
         });
     if rate <= 0. {
@@ -245,7 +245,7 @@ fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File)
                     return Ok(());
                 }
                 Err(ref e) => {
-                    panic!("{}: read error: {}", name, e);
+                    panic!("{name}: read error: {e}");
                 }
             }
         }
