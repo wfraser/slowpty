@@ -229,6 +229,23 @@ fn event_loop<'a>(delay: Delay, console: &'a mut File, pty_master: &'a mut File)
                 Ok(1) => {
                     debug!("{}: got {:?}", name, buf[0] as char);
 
+                    if buf[0] == 0x1B {
+                        // HACK: for escape sequences, try and read another byte and send both at
+                        // once if we get one immediately.
+                        // This is because some fragile programs (like crossterm) if they see a
+                        // single ESC by itself from a read() will immediately treat it as a
+                        // keypress and not try to read more bytes and interpret an escape
+                        // sequence.
+                        let mut buf2 = [0u8];
+                        if let Ok(1) = src.read(&mut buf2) {
+                            let buf = [buf[0], buf2[0]];
+                            if let Err(e) = dst.write_all(&buf) {
+                                return Err(e).context("write error");
+                            }
+                            continue;
+                        }
+                    }
+
                     if let Err(e) = dst.write_all(&buf) {
                         return Err(e).context("write error");
                     }
