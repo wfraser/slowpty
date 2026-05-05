@@ -98,7 +98,7 @@ impl<'a> ReadableSet<'a> {
         Ok(PollResult::Ok)
     }
 
-    pub fn endpoint(&mut self, idx: usize) -> Option<PollEndpoint> {
+    pub fn endpoint(&mut self, idx: usize) -> Option<PollEndpoint<'_>> {
         match idx {
             0 => Some(PollEndpoint {
                 name: "console",

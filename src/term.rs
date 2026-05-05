@@ -1,48 +1,8 @@
 use anyhow::Result;
-use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
 
 use crate::checkerr;
-
-static mut ORIGINAL_TERM_SETTINGS: Option<libc::termios> = None;
-
-pub extern "C" fn reset_tty() {
-    unsafe {
-        // note: can't print anything here
-        if let Some(settings) = ORIGINAL_TERM_SETTINGS.take() {
-            let result = libc::tcsetattr(0, libc::TCSANOW, &settings);
-            let _e = io::Error::last_os_error();
-            if -1 == result {
-                libc::abort()
-            }
-        }
-    }
-}
-
-pub fn set_raw(fd: RawFd) -> Result<()> {
-    let mut t = unsafe { ORIGINAL_TERM_SETTINGS }
-        .ok_or_else(|| anyhow!("original terminal settings not set yet!"))?;
-    unsafe { libc::cfmakeraw(&mut t as *mut _) };
-    checkerr(unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &t as *const _) },
-        "tcsetattr(raw)")?;
-    Ok(())
-}
-
-pub fn save_term_settings(fd: RawFd) -> Result<()> {
-    let mut settings: libc::termios = unsafe { mem::zeroed() };
-    checkerr(unsafe { libc::tcgetattr(fd, &mut settings) },
-        "tcgetattr(original settings)")?;
-
-    unsafe { ORIGINAL_TERM_SETTINGS = Some(settings); }
-
-    Ok(())
-}
-
-pub fn restore_term_settings_at_exit() -> Result<()> {
-    checkerr(unsafe { libc::atexit(reset_tty) }, "atexit")?;
-    Ok(())
-}
 
 pub fn set_controlling_tty(fd: RawFd) -> Result<()> {
     #[allow(clippy::useless_conversion)] // it isn't identical on all platforms
@@ -71,5 +31,50 @@ impl WindowSize {
         checkerr(unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &self.ws) },
             "ioctl(TIOCSWINSZ)")?;
         Ok(())
+    }
+}
+
+pub struct TermSettings {
+    termios: libc::termios,
+    fd: RawFd,
+}
+
+impl TermSettings {
+    /// Get the current terminal settings for the given fd.
+    pub fn current(fd: RawFd) -> Result<Self> {
+        let mut termios: libc::termios = unsafe { mem::zeroed() };
+        checkerr(unsafe { libc::tcgetattr(fd, &mut termios) },
+            "tcgetattr(original settings)")?;
+
+        Ok(Self { termios, fd })
+    }
+
+    /// Set the terminal to raw mode; the previously saved settings are used as a basis.
+    pub fn set_raw(&self) -> Result<()> {
+        let mut t = self.termios;
+        unsafe { libc::cfmakeraw(&mut t as *mut _) };
+        checkerr(unsafe { libc::tcsetattr(self.fd, libc::TCSAFLUSH, &t as *const _) },
+            "tcsetattr(raw)")?;
+        Ok(())
+    }
+
+    /// Reset the terminal back to original saved settings.
+    pub fn reset(mut self) -> Result<()> {
+        self.internal_reset()
+    }
+
+    fn internal_reset(&mut self) -> Result<()> {
+        checkerr(unsafe { libc::tcsetattr(self.fd, libc::TCSANOW, &self.termios)},
+            "tcsetattr(original settings)")?;
+        Ok(())
+    }
+}
+
+impl Drop for TermSettings {
+    fn drop(&mut self) {
+        if self.internal_reset().is_err() {
+            // note: don't print anything here since this is likely to run on exit
+            unsafe { libc::abort() }
+        }
     }
 }

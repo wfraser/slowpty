@@ -1,4 +1,3 @@
-#[macro_use] extern crate anyhow;
 #[macro_use] extern crate log;
 
 use anyhow::{Context, Result};
@@ -15,6 +14,7 @@ mod term;
 
 use delay::Delay;
 use readable::{PollEndpoint, PollResult, ReadableSet};
+use term::TermSettings;
 
 pub fn checkerr(result: i32, msg: &'static str) -> Result<i32> {
     if result == -1 {
@@ -62,6 +62,7 @@ struct ForkResult {
     child_pid: libc::pid_t,
     pty_master: File,
     pty_slave: Option<File>,
+    term_settings: TermSettings,
 }
 
 fn setup() -> Result<ForkResult> {
@@ -88,13 +89,13 @@ fn setup() -> Result<ForkResult> {
             None
         };
 
-        term::save_term_settings(0)?;
-        term::set_raw(0)?;
-        term::restore_term_settings_at_exit()?;
+        let term_settings = TermSettings::current(0)?;
+        term_settings.set_raw()?;
         Ok(ForkResult { 
             child_pid: pid,
             pty_master: master,
             pty_slave: returned_slave,
+            term_settings,
         })
     } else {
         // child
@@ -154,7 +155,7 @@ fn main() -> Result<()> {
     let delay = Delay::from_rate(rate);
 
     let mut console = unsafe { File::from_raw_fd(0) };
-    let ForkResult { child_pid, mut pty_master, pty_slave } = setup()
+    let ForkResult { child_pid, mut pty_master, pty_slave, term_settings } = setup()
         .context("failed to setup PTY")?;
 
     event_loop(delay, &mut console, &mut pty_master)?;
@@ -169,7 +170,9 @@ fn main() -> Result<()> {
         .context("error waiting for child process")?;
 
     debug!("resetting tty settings");
-    term::reset_tty();
+    if let Err(e) = term_settings.reset() {
+        warn!("failed to reset tty: {e:#}");
+    }
 
     if child_status != 0 {
         let exit_code = if libc::WIFEXITED(child_status) {
